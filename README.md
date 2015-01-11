@@ -1,7 +1,6 @@
-==============================================================================================
-                     ##Clustered Replicable Queue (based on Infinispan)
-==============================================================================================
-
+===================================================================================================
+                     # Clustered Replicable Queue (based on Infinispan)
+===================================================================================================
 This application demonstrates *Replicable Queue* running on *Two Node* in *Java SE*.
 
 The example can be deployed from the command line your IDE directly or using maven.
