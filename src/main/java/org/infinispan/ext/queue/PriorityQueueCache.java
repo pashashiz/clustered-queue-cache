@@ -450,10 +450,8 @@ public class PriorityQueueCache<K, V>
             log.debugf("Entry {%s: %s} was added in the cache: %s", event.getKey(), event.getValue(), event.getCache());
             try {
                 integrityMutex.lock();
-                // Replicate adding event in a remote Node
-                CacheEntry<K, V> cacheEntry = new PriorityCacheEntry<>(event.getKey(), event.getValue());
-                ((PriorityCacheEntry<K, V>)cacheEntry).bindCache(cache, false);
-                queue.add(cacheEntry);
+                // Replicate adding of cache entry in local queue
+                queue.add(new PriorityCacheEntry<>(event.getKey(), event.getValue()));
             } finally {
                 integrityMutex.unlock();
             }
@@ -474,9 +472,9 @@ public class PriorityQueueCache<K, V>
         public void onRemoved(CacheEntryRemovedEvent<K, V> event) {
             if (event.isPre()) return;
             log.debugf("Entry {%s: %s} was removed from the cache %s", event.getKey(), event.getValue(), event.getCache());
-            integrityMutex.lock();
-            // Replicate removing event in a remote Node
             try {
+                integrityMutex.lock();
+                // Replicate removing of cache entry in local queue
                 queue.remove(new PriorityCacheEntry<>(event.getKey(), event.getValue()));
             } finally {
                 integrityMutex.unlock();
