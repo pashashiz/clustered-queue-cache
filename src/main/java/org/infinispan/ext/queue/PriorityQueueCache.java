@@ -1,7 +1,5 @@
 package org.infinispan.ext.queue;
 
-import org.infinispan.notifications.cachelistener.annotation.TopologyChanged;
-import org.infinispan.notifications.cachelistener.event.TopologyChangedEvent;
 import org.infinispan.util.concurrent.ConcurrentHashSet;
 import org.infinispan.util.logging.Log;
 import org.infinispan.util.logging.LogFactory;
@@ -13,6 +11,7 @@ import org.infinispan.notifications.cachelistener.event.CacheEntryCreatedEvent;
 import org.infinispan.notifications.cachelistener.event.CacheEntryModifiedEvent;
 import org.infinispan.notifications.cachelistener.event.CacheEntryRemovedEvent;
 
+import javax.transaction.*;
 import java.util.*;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
@@ -48,7 +47,7 @@ public class PriorityQueueCache<K, V>
      * @param <K> {@link CacheEntry} key
      * @param <V> {@link CacheEntry} value
      */
-    public static class PriorityCacheEntry<K, V> implements CacheEntry<K, V> {
+    public static class PriorityCacheEntry<K, V> implements CacheEntry<K, V>, Comparable<CacheEntry<K, V>> {
 
         // Fields
         private K key;
@@ -93,6 +92,44 @@ public class PriorityQueueCache<K, V>
                     cache.put(key, value);
                 else
                     this.value = value;
+            } finally {
+                mutex.unlock();
+            }
+        }
+
+        @Override
+        public boolean updateIfConditional(Conditional<V> conditional, Updater<V> updater) {
+            try {
+                mutex.lock();
+                // If cache entry is binded with real cache
+                if (isCacheBinded) {
+                    try {
+                        boolean isSatisfied;
+                        TransactionManager tx = cache.getAdvancedCache().getTransactionManager();
+                        tx.begin();
+                        ArrayList<K> keys = new ArrayList<K>() {{
+                            add(key);
+                        }};
+                        cache.getAdvancedCache().lock(keys);
+                        value = cache.get(key);
+                        if (isSatisfied = conditional.checkValue(value)) {
+                            updater.update(value);
+                            cache.put(key, value);
+                        }
+                        tx.commit();
+                        return isSatisfied;
+                    } catch (Exception e) {
+                        log.warn("Error during transaction", e);
+                        return false;
+                    }
+                }
+                // If cache entry is unbinded
+                else {
+                    boolean isSatisfied;
+                    if (isSatisfied = conditional.checkValue(value))
+                        updater.update(value);
+                    return isSatisfied;
+                }
             } finally {
                 mutex.unlock();
             }
@@ -154,6 +191,17 @@ public class PriorityQueueCache<K, V>
             return String.format("Cache Entry: {key: %s, value: %s}", getKey(), getValue());
         }
 
+        @Override
+        public int compareTo(CacheEntry<K, V> value) {
+            return ((Comparable<V>)value.getValue()).compareTo(value.getValue());
+        }
+
+//        @Override
+//        public int compareTo(V value) {
+//            Comparable<V> current = (Comparable<V>) this.value;
+//            Comparable<V> in = (Comparable<V>) value;
+//            return current.compareTo(value)
+//        }
     }
 
     // Logger
@@ -200,6 +248,9 @@ public class PriorityQueueCache<K, V>
                 PriorityCacheEntry<K, V> cacheEntry = new PriorityCacheEntry<>(entry.getKey(), entry.getValue());
                 cacheEntry.bindCache(cache, false);
                 queue.add(cacheEntry);
+                // Fire restore event
+                for (Listener<K, V> listener : listeners)
+                    listener.onEntryRestored(cacheEntry);
             }
             if (queue.isEmpty())
                 log.debug("No existing elements of queues was found in the cluster");
@@ -449,7 +500,6 @@ public class PriorityQueueCache<K, V>
                 integrityMutex.lock();
                 // Replicate adding event in a remote Node
                 CacheEntry<K, V> cacheEntry = new PriorityCacheEntry<>(event.getKey(), event.getValue());
-                ((PriorityCacheEntry<K, V>)cacheEntry).bindCache(cache, false);
                 queue.add(cacheEntry);
             } finally {
                 integrityMutex.unlock();
@@ -481,14 +531,6 @@ public class PriorityQueueCache<K, V>
             // Fire on removed event
             for (Listener<K, V> listener : listeners)
                 listener.onEntryRemoved(event);
-        }
-
-        @TopologyChanged
-        public void onTopologyChanged(TopologyChangedEvent<String, String> event) {
-            if (event.isPre()) return;
-            // Fire on topology changed event
-            for (Listener<K, V> listener : listeners)
-                listener.onTopologyChanged(event);
         }
 
     }

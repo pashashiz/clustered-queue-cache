@@ -30,28 +30,28 @@ public interface QueueCache<K, V> extends Queue<CacheEntry<K, V>> {
          *
          * @param event Cache entry event
          */
-        public void onEntryAdded(CacheEntryCreatedEvent<K, V> event);
+        void onEntryAdded(CacheEntryCreatedEvent<K, V> event);
+
+        /**
+         * Lister of event - Cache entry was restored
+         *
+         * @param entry Entry
+         */
+        void onEntryRestored(CacheEntry<K, V> entry);
 
         /**
          * Listener of event - Cache entry was modified
          *
          * @param event Cache entry event
          */
-        public void onEntryModified(CacheEntryModifiedEvent<K, V> event);
+        void onEntryModified(CacheEntryModifiedEvent<K, V> event);
 
         /**
          * Listener of event - Cache entry was removed
          *
          * @param event Cache entry event
          */
-        public void onEntryRemoved(CacheEntryRemovedEvent<K, V> event);
-
-        /**
-         * Listener of event - Topology was changed
-         *
-         * @param event Topology changing event
-         */
-        public void onTopologyChanged(TopologyChangedEvent<String, String> event);
+        void onEntryRemoved(CacheEntryRemovedEvent<K, V> event);
 
     }
 
@@ -62,25 +62,25 @@ public interface QueueCache<K, V> extends Queue<CacheEntry<K, V>> {
      * @param value Value
      * @return New unbined cache entry
      */
-    public CacheEntry<K, V> createEntry(K key, V value);
+    CacheEntry<K, V> createEntry(K key, V value);
 
     /**
      * Add {@linkplain QueueCache.Listener queue listener}
      *
      * @param listener Queue listener to add
      */
-    public void addListener(Listener<K, V> listener);
+    void addListener(Listener<K, V> listener);
 
     /**
      * Remove {@linkplain QueueCache.Listener queue listener}
      *
      * @param listener Queue listener to remove
      */
-    public void removeListener(Listener<K, V> listener);
+    void removeListener(Listener<K, V> listener);
 
     /**
      * Remove all {@linkplain QueueCache.Listener queue listeners}
      */
-    public void removeAlListeners();
+    void removeAlListeners();
 
 }

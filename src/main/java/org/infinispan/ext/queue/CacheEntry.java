@@ -16,6 +16,39 @@ package org.infinispan.ext.queue;
 public interface CacheEntry<K,V> {
 
     /**
+     * Entry conditional
+     *
+     * @param <V> {@link CacheEntry} value
+     */
+    public interface Conditional<V> {
+
+        /**
+         * Check entry value
+         *
+         * @param value Entry value
+         * @return {@code true} - Entry value conditional is satisfied {@code false} - otherwise
+         */
+        boolean checkValue(V value);
+
+    }
+
+    /**
+     * Entry updater
+     *
+     * @param <V> {@link CacheEntry} value
+     */
+    public interface Updater<V> {
+
+        /**
+         * Update entry value
+         *
+         * @param value Entry value
+         */
+        void update(V value);
+
+    }
+
+    /**
      * Get key
      *
      * @return Cache entry key
@@ -36,6 +69,15 @@ public interface CacheEntry<K,V> {
      * @param value Cache entry value
      */
     public void update(V value);
+
+    /**
+     * Atomic updating entry if condition is satisfied
+     *
+     * @param conditional Entry conditional
+     * @param updater Cache entry value updater
+     * @return {@code true} - if condition is satisfied and entry was updated successfully, {@code false} - otherwise
+     */
+    boolean updateIfConditional(Conditional<V> conditional, Updater<V> updater);
 
     /**
      * Check if cache is binded (it is belongs a queue)

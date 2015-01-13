@@ -7,8 +7,13 @@ import org.infinispan.configuration.cache.ConfigurationBuilder;
 import org.infinispan.manager.EmbeddedCacheManager;
 import org.infinispan.notifications.cachelistener.annotation.CacheEntryCreated;
 import org.infinispan.notifications.cachelistener.annotation.CacheEntryRemoved;
+import org.infinispan.notifications.cachelistener.annotation.TopologyChanged;
 import org.infinispan.notifications.cachelistener.event.CacheEntryCreatedEvent;
 import org.infinispan.notifications.cachelistener.event.CacheEntryRemovedEvent;
+import org.infinispan.notifications.cachelistener.event.TopologyChangedEvent;
+import org.infinispan.notifications.cachemanagerlistener.event.ViewChangedEvent;
+import org.infinispan.transaction.lookup.JBossStandaloneJTAManagerLookup;
+import org.infinispan.transaction.LockingMode;
 import org.infinispan.util.concurrent.ConcurrentHashSet;
 import org.infinispan.util.logging.Log;
 import org.infinispan.util.logging.LogFactory;
@@ -21,13 +26,13 @@ import java.util.concurrent.locks.ReentrantLock;
 /**
  * Manager of {@linkplain QueueCache queues}, which are based on dynamic caches.
  *
- * <p>In its turn that manager based on static {@linkplain Cache Infinispan queuesManagerCache} and inherit queuesManagerCache behavior.
- * <p>In case when it is uses underlying queuesManagerCache witch is replicated - all queues created by that manager
+ * <p>In its turn that manager based on static {@linkplain Cache Infinispan queuesManagerCache} and inherit cache behavior.
+ * <p>In case when it is uses underlying cache witch is replicated - all queues created by that manager
  * will be replicated through the cluster and dynamically created by other nodes
- * <p>In another case when it is uses local queuesManagerCache - all queues will be like local queuesManagerCache
+ * <p>In another case when it is uses local cache - all queues will be like local cache
  *
  * <p>If to create {@link QueuesManager} it was used full constructor
- * {@link QueuesManager#QueuesManager(EmbeddedCacheManager, QueueType, String, String)}
+ * {@link QueuesManager#QueuesManager(EmbeddedCacheManager, QueuesManager.QueueType, QueuesManager.Listener, String, String)}
  * you specify behaviour of that manager by changing <b>manager named cache</b> properties
  * and behaviour of queues elements by changing <b>queue named cache</b> properties.
  * Otherwise it will be used default cache properties - <b>synchronous replicated cache</b>
@@ -52,12 +57,27 @@ public class QueuesManager<K, V> {
         public void onQueueAdded(CacheEntryCreatedEvent<String, Boolean> event, QueueCache<K, V> queue);
 
         /**
+         * Listener of event - Queue was restored
+         *
+         * @param reason Reason
+         * @param queue Restored queue
+         */
+        public void onQueueRestored(String reason, QueueCache<K, V> queue);
+
+        /**
          * Listener of event - Queue was removed
          *
          * @param event Cache entry event
          * @param queue Removed queue
          */
         public void onQueueRemoved(CacheEntryRemovedEvent<String, Boolean> event, QueueCache<K, V> queue);
+
+        /**
+         * Listener of event - Cluster view was changed
+         *
+         * @param event View change event
+         */
+        public void onTopologyChanged(TopologyChangedEvent event);
 
     }
 
@@ -89,9 +109,10 @@ public class QueuesManager<K, V> {
      *
      * @param cacheManager Cache manager
      * @param queuesType {@linkplain QueueType Type} of queues, which will be created by current manager
+     * @param listener Started listener
      */
-    public QueuesManager(EmbeddedCacheManager cacheManager, QueueType queuesType) {
-        this(cacheManager, queuesType, null, null);
+    public QueuesManager(EmbeddedCacheManager cacheManager, QueueType queuesType, Listener<K, V> listener) {
+        this(cacheManager, queuesType, listener, null, null);
     }
 
     /**
@@ -99,14 +120,17 @@ public class QueuesManager<K, V> {
      *
      * @param cacheManager Cache manager
      * @param queuesType {@linkplain QueueType Type} of queues, which will be created by current manager
+     * @param listener Started listener
      * @param queuesManagerConfName Name of configuration which will be used to create static cache of queues wrappers
      * @param queuesConfName Name of configuration which will be used to create dynamic caches of element of queues
      */
-    public QueuesManager(EmbeddedCacheManager cacheManager, QueueType queuesType,
+    public QueuesManager(EmbeddedCacheManager cacheManager, QueueType queuesType, Listener<K, V> listener,
                          String queuesManagerConfName, String queuesConfName) {
         if (cacheManager == null) throw new NullPointerException("Cache manager cannot be null");
         this.queuesType = queuesType;
         this.cacheManager = cacheManager;
+        if (listener != null)
+            this.listeners.add(listener);
         Configuration queuesManagerConf;
         // Read manager cache configuration if it exists
         if (queuesManagerConfName != null)
@@ -123,10 +147,12 @@ public class QueuesManager<K, V> {
         if (queuesConfName != null)
             queuesConf = new ConfigurationBuilder()
                     .read(cacheManager.getCacheConfiguration(queuesConfName)).build();
-            // Use default manager configuration
+        // Use default manager configuration
         else
             queuesConf = new ConfigurationBuilder()
-                    .clustering().cacheMode(CacheMode.REPL_SYNC).build();
+                    .clustering().cacheMode(CacheMode.REPL_SYNC)
+                    .transaction().transactionManagerLookup(new JBossStandaloneJTAManagerLookup())
+                    .lockingMode(LockingMode.PESSIMISTIC).build();
         // Create cache for Queues Manager
         queuesManagerCache = cacheManager.getCache(queuesManagerCacheName);
         // Add listener (cache level)
@@ -140,8 +166,12 @@ public class QueuesManager<K, V> {
         log.debug("Try to restore existing queues in the cluster...");
         try {
             integrityMutex.lock();
-            for (Map.Entry<String, Boolean> entry : queuesManagerCache.entrySet())
-                createQueueLocal(entry.getKey());
+            for (Map.Entry<String, Boolean> entry : queuesManagerCache.entrySet()) {
+                QueueCache<K, V> queue = createQueueLocal(entry.getKey());
+                // Fire restore event
+                for (Listener<K, V> listener : listeners)
+                    listener.onQueueRestored(entry.getKey(), queue);
+            }
         } finally {
             integrityMutex.unlock();
         }
@@ -161,6 +191,7 @@ public class QueuesManager<K, V> {
      */
     public QueueCache<K, V> createQueue(String name) {
         String queueCacheName = createQueueCacheName(name);
+        // TODO Later: Could be improved using transaction
         if (!containsQueue(name)) {
             // Share message [Replicated Queue is created] across cluster
             // After all Nodes get that message, event will be processed in current Thread for current Node
@@ -200,6 +231,15 @@ public class QueuesManager<K, V> {
         } finally {
             integrityMutex.unlock();
         }
+    }
+
+    /**
+     * Get existing queues
+     *
+     * @return Existing queues
+     */
+    public ConcurrentHashMap<String, QueueCache<K, V>> getExistingQueues() {
+        return queues;
     }
 
     /**
@@ -304,6 +344,14 @@ public class QueuesManager<K, V> {
             // Fire on remove event
             for (Listener<K, V> listener : listeners)
                 listener.onQueueRemoved(event, queue);
+        }
+
+        @TopologyChanged
+        public void onTopologyChanged(TopologyChangedEvent<String, Boolean> event) {
+            if (event.isPre()) return;
+            // Fire on topology changed event
+            for (Listener<K, V> listener : listeners)
+                listener.onTopologyChanged(event);
         }
 
     }
