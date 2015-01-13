@@ -198,6 +198,8 @@ public class PriorityQueueCache<K, V>
 
     }
 
+    // Constants
+    private static final int DEFAULT_INITIAL_CAPACITY = 11;
     // Logger
     private static final Log log = LogFactory.getLog(PriorityQueueCache.class);
     // Fields
@@ -227,7 +229,8 @@ public class PriorityQueueCache<K, V>
      * @param comparator Comparator to order the elements of the priority queue
      */
     PriorityQueueCache(Cache<K, V> cache, Comparator<? super CacheEntry<K, V>> comparator) {
-        queue = (comparator != null) ? new PriorityQueue<>(comparator) : new PriorityQueue<CacheEntry<K, V>>();
+        queue = (comparator != null) ? new PriorityQueue<>(DEFAULT_INITIAL_CAPACITY, comparator)
+                : new PriorityQueue<CacheEntry<K, V>>();
         this.cache = cache;
         this.cache.addListener(new LocalListener());
         restoreElements();
