@@ -10,7 +10,11 @@
 
     <cache-container default-cache="default">
         <transport stack="udp" node-name="${nodeName}"/>
-        <!-- Custom cache properties -->
+        <!--<replicated-cache name="example" mode="SYNC">-->
+            <!--<locking isolation="REPEATABLE_READ" striping="false"/>-->
+            <!--<transaction transaction-manager-lookup="org.infinispan.transaction.lookup.JBossStandaloneJTAManagerLookup"-->
+                         <!--mode="FULL_XA" locking="PESSIMISTIC"/>-->
+        <!--</replicated-cache>-->
     </cache-container>
 
 </infinispan>

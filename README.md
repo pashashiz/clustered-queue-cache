@@ -11,5 +11,5 @@ To try with a *Replicated Queue*, run the following command in separated termina
     * Node A: `mvn compile exec:java -Dexec.args="A"`
     * Node B: `mvn compile exec:java -Dexec.args="B"`
 2. Using command line or IDE directly:
-    * Node A: `java -cp "your classpath" -Djava.net.preferIPv4Stack=true org.infinispan.ext.Runner A"`
-    * Node B: `java -cp "your classpath" -Djava.net.preferIPv4Stack=true org.infinispan.ext.Runner B"`
+    * Node A: `java -cp "your classpath" -Djava.net.preferIPv4Stack=true org.infinispan.ext.demo1.Runner A"`
+    * Node B: `java -cp "your classpath" -Djava.net.preferIPv4Stack=true org.infinispan.ext.demo1.Runner B"`
