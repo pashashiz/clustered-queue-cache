@@ -15,6 +15,8 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * Event dispatcher (singleton)
@@ -27,16 +29,22 @@ public enum EventDispatcher {
 
     // Constants
     public final String CONFIG_FILE = "infinispan.xml";
+    public final int THREAD_POOL_CAPACITY = 20;
     // Logger
     private final Logger log = Logger.getLogger(EventDispatcher.class);
     // Fields
     protected final QueuesManager<String, Event> queuesManager;
     protected final EmbeddedCacheManager cacheManager;
+    private final ExecutorService executor;
 
     /**
      * Create event dispatcher
      */
     private EventDispatcher() {
+        // Executor to process events
+        // TODO It will be improved by using of bounded thread pool and not blocking queue
+        executor = Executors.newCachedThreadPool();
+        // Cache manager with base configuration
         cacheManager = createCacheManagerFromXml();
         // Init queues manager with default configuration and base listener
         queuesManager = new QueuesManager<>(cacheManager, QueuesManager.QueueType.PRIORITY, getQueuesListener());
@@ -143,7 +151,7 @@ public enum EventDispatcher {
      */
     private void tryProcessQueue(final String reason, final List<String> ownersToReprocess) {
         // Try to process entry - call temporary thread (will be improved later!)
-        Thread process = new Thread(new Runnable() {
+        executor.submit(new Runnable() {
             @Override
             public void run() {
                 imitationWait();
@@ -172,13 +180,11 @@ public enum EventDispatcher {
                         });
                         // If we have ownership - process event!!!
                         if (hasOwnership)
-                            EventProcessor.getInstance().processEventAsync(entry);
+                            EventProcessor.getInstance().processEvent(entry);
                     }
                 }
             }
         });
-        process.setName("process-" + reason);
-        process.start();
     }
 
     // Get queue by reason
