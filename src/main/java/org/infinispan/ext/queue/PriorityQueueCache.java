@@ -152,7 +152,6 @@ public class PriorityQueueCache<K, V>
             try {
                 mutex.lock();
                 isCacheBinded = false;
-                value = cache.get(key);
                 cache.remove(key);
                 cache = null;
             } finally {
@@ -206,7 +205,7 @@ public class PriorityQueueCache<K, V>
     private final Cache<K, V> cache;
     private final PriorityQueue<CacheEntry<K, V>> queue;
     private final Lock mutex = new ReentrantLock();
-    private final Lock integrityMutex = new ReentrantLock();;
+    private final Lock consistentMutex = new ReentrantLock();;
     private final ConcurrentHashSet<Listener<K, V>> listeners = new ConcurrentHashSet<>();
 
     /**
@@ -240,7 +239,7 @@ public class PriorityQueueCache<K, V>
     private void restoreElements() {
         try {
             log.debug("Try to restore existing element of queue in the cluster...");
-            integrityMutex.lock();
+            consistentMutex.lock();
             for (Map.Entry<K, V> entry : cache.entrySet()) {
                 PriorityCacheEntry<K, V> cacheEntry = new PriorityCacheEntry<>(entry.getKey(), entry.getValue());
                 cacheEntry.bindCache(cache, false);
@@ -254,7 +253,7 @@ public class PriorityQueueCache<K, V>
             else
                 log.debugf("%d elements of queue was restored", queue.size());
         } finally {
-            integrityMutex.unlock();
+            consistentMutex.unlock();
         }
     }
 
@@ -283,10 +282,10 @@ public class PriorityQueueCache<K, V>
     public CacheEntry<K, V> peek() {
         try {
             mutex.lock();
-            integrityMutex.lock();
+            consistentMutex.lock();
             return queue.peek();
         } finally {
-            integrityMutex.unlock();
+            consistentMutex.unlock();
             mutex.unlock();
         }
     }
@@ -336,10 +335,10 @@ public class PriorityQueueCache<K, V>
     public int size() {
         try {
             mutex.lock();
-            integrityMutex.lock();
+            consistentMutex.lock();
             return queue.size();
         } finally {
-            integrityMutex.unlock();
+            consistentMutex.unlock();
             mutex.unlock();
         }
     }
@@ -348,10 +347,10 @@ public class PriorityQueueCache<K, V>
     public boolean remove(Object o) {
         try {
             mutex.lock();
-            integrityMutex.lock();
+            consistentMutex.lock();
             return (cache.remove(((PriorityCacheEntry<K, V>) o).key) != null);
         } finally {
-            integrityMutex.unlock();
+            consistentMutex.unlock();
             mutex.unlock();
         }
     }
@@ -360,10 +359,10 @@ public class PriorityQueueCache<K, V>
     public boolean contains(Object o) {
         try {
             mutex.lock();
-            integrityMutex.lock();
+            consistentMutex.lock();
             return queue.contains(o);
         } finally {
-            integrityMutex.unlock();
+            consistentMutex.unlock();
             mutex.unlock();
         }
     }
@@ -371,10 +370,10 @@ public class PriorityQueueCache<K, V>
     public String toString() {
         try {
             mutex.lock();
-            integrityMutex.lock();
+            consistentMutex.lock();
             return queue.toString();
         } finally {
-            integrityMutex.unlock();
+            consistentMutex.unlock();
             mutex.unlock();
         }
     }
@@ -383,10 +382,10 @@ public class PriorityQueueCache<K, V>
     public Object[] toArray() {
         try {
             mutex.lock();
-            integrityMutex.lock();
+            consistentMutex.lock();
             return queue.toArray();
         } finally {
-            integrityMutex.unlock();
+            consistentMutex.unlock();
             mutex.unlock();
         }
     }
@@ -395,10 +394,10 @@ public class PriorityQueueCache<K, V>
     public <T> T[] toArray(T[] a) {
         try {
             mutex.lock();
-            integrityMutex.lock();
+            consistentMutex.lock();
             return queue.toArray(a);
         } finally {
-            integrityMutex.unlock();
+            consistentMutex.unlock();
             mutex.unlock();
         }
     }
@@ -495,11 +494,12 @@ public class PriorityQueueCache<K, V>
             log.debugf("Entry {%s: %s} was added in the cache: %s", event.getKey(), event.getValue(), event.getCache());
             // Replicate adding event in a remote Node
             try {
-                integrityMutex.lock();
-                CacheEntry<K, V> cacheEntry = new PriorityCacheEntry<>(event.getKey(), event.getValue());
+                consistentMutex.lock();
+                PriorityCacheEntry<K, V> cacheEntry = new PriorityCacheEntry<>(event.getKey(), event.getValue());
+                cacheEntry.bindCache(cache, false);
                 queue.add(cacheEntry);
             } finally {
-                integrityMutex.unlock();
+                consistentMutex.unlock();
             }
             // Fire on added event
             for (Listener<K, V> listener : listeners)
@@ -520,10 +520,10 @@ public class PriorityQueueCache<K, V>
             log.debugf("Entry {%s: %s} was removed from the cache %s", event.getKey(), event.getValue(), event.getCache());
             // Replicate removing event in a remote Node
             try {
-                integrityMutex.lock();
+                consistentMutex.lock();
                 queue.remove(new PriorityCacheEntry<>(event.getKey(), event.getValue()));
             } finally {
-                integrityMutex.unlock();
+                consistentMutex.unlock();
             }
             // Fire on removed event
             for (Listener<K, V> listener : listeners)

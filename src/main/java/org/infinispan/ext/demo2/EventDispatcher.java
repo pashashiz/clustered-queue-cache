@@ -57,7 +57,6 @@ public enum EventDispatcher {
     // Read cache manager configuration from file
     private EmbeddedCacheManager createCacheManagerFromXml() {
         log.debug("Starting a cache manager with an XML configuration");
-        System.setProperty("nodeName", nodeName);
         try {
             return new DefaultCacheManager(CONFIG_FILE);
         } catch (IOException e) {
@@ -76,9 +75,9 @@ public enum EventDispatcher {
             }
 
             @Override
-            public void onQueueRestored(String reason, QueueCache<String, Event> queue) {
+            public void onQueueRestored(String name, QueueCache<String, Event> queue) {
                 // Listen all queue events
-                listenQueue(reason, queue);
+                listenQueue(name, queue);
             }
 
             @Override
@@ -89,8 +88,8 @@ public enum EventDispatcher {
             @Override
             public void onTopologyChanged(TopologyChangedEvent event) {
                 // Will be improved
-                //for (Map.Entry<String, QueueCache<String, Event>> queueEntry : queuesManager.getExistingQueues().entrySet())
-                //    tryProcessQueue(queueEntry.getKey().substring(4, queueEntry.getKey().length()));
+                //for (Map.Entry<String, QueueCache<String, Event>> queueCacheEntry : queuesManager.getExistingQueues().entrySet())
+                //    tryProcessQueue(queueCacheEntry.getKey());
             }
 
         };
@@ -103,13 +102,13 @@ public enum EventDispatcher {
             @Override
             public void onEntryAdded(final CacheEntryCreatedEvent<String, Event> event) {
                 // Try to process queue (try to take over queue optimistic lock and process)
-                tryProcessQueue(event.getValue().getReason());
+                tryProcessQueue(reason);
             }
 
             @Override
             public void onEntryRestored(CacheEntry<String, Event> entry) {
                 // Try to process queue (try to take over queue optimistic lock and process)
-                tryProcessQueue(entry.getValue().getReason());
+                tryProcessQueue(reason);
             }
 
             @Override
@@ -121,7 +120,7 @@ public enum EventDispatcher {
             @Override
             public void onEntryRemoved(CacheEntryRemovedEvent<String, Event> event) {
                 // Try to process queue (try to take over queue optimistic lock and process)
-                //tryProcessQueue(reason);
+                tryProcessQueue(reason);
             }
         });
     }
@@ -129,7 +128,7 @@ public enum EventDispatcher {
     // Try to process queue (try to take over queue optimistic lock and process )
     private void tryProcessQueue(final String reason) {
         // Try to process entry - call temporary thread (will be improved later!)
-        new Thread(new Runnable() {
+        Thread process = new Thread(new Runnable() {
             @Override
             public void run() {
                 imitationWait();
@@ -160,7 +159,9 @@ public enum EventDispatcher {
                     }
                 }
             }
-        }).start();
+        });
+        process.setName("process-" + reason);
+        process.start();
     }
 
     // Get queue by reason
@@ -177,7 +178,7 @@ public enum EventDispatcher {
     public boolean postEvent(Event event) {
         log.debug("Event " + event + " was received be Event Dispatcher");
         QueueCache<String, Event> queue = getQueue(event.getReason());
-        queue.add(queue.createEntry(createKeyMask(event.getId()), event));
+        queue.add(queue.createEntry(String.valueOf(event.getId()), event));
         return true;
     }
 
@@ -188,17 +189,10 @@ public enum EventDispatcher {
      * @return {@code true} - event was removed, {@code false} - otherwise
      */
     public boolean removeEvent(Event event) {
-        QueueCache<String, Event> queue = getQueue(event.getReason());;
+        QueueCache<String, Event> queue = getQueue(event.getReason());
         // Remove processed event
-        CacheEntry<String, Event> entry = queue.poll();
-        // Try to process queue further
-        tryProcessQueue(entry.getValue().getReason());
+        queue.poll();
         return true;
-    }
-
-    // Create key mask (just for presentation)
-    private String createKeyMask(int key) {
-        return "node-" + nodeName + "-" + key;
     }
 
     // Imitation of real situation

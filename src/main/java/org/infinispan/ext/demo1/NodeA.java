@@ -61,7 +61,7 @@ public class NodeA extends Node {
             }
 
             @Override
-            public void onQueueRestored(String reason, QueueCache<String, String> queue) {
+            public void onQueueRestored(String name, QueueCache<String, String> queue) {
                 // Do nothing
             }
 

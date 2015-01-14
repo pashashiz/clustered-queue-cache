@@ -11,7 +11,6 @@ import org.infinispan.notifications.cachelistener.annotation.TopologyChanged;
 import org.infinispan.notifications.cachelistener.event.CacheEntryCreatedEvent;
 import org.infinispan.notifications.cachelistener.event.CacheEntryRemovedEvent;
 import org.infinispan.notifications.cachelistener.event.TopologyChangedEvent;
-import org.infinispan.notifications.cachemanagerlistener.event.ViewChangedEvent;
 import org.infinispan.transaction.lookup.JBossStandaloneJTAManagerLookup;
 import org.infinispan.transaction.LockingMode;
 import org.infinispan.util.concurrent.ConcurrentHashSet;
@@ -59,10 +58,10 @@ public class QueuesManager<K, V> {
         /**
          * Listener of event - Queue was restored
          *
-         * @param reason Reason
+         * @param name Queue name
          * @param queue Restored queue
          */
-        public void onQueueRestored(String reason, QueueCache<K, V> queue);
+        public void onQueueRestored(String name, QueueCache<K, V> queue);
 
         /**
          * Listener of event - Queue was removed
@@ -100,7 +99,7 @@ public class QueuesManager<K, V> {
     private final Configuration queuesConf;
     private final ConcurrentHashMap<String, QueueCache<K, V>> queues = new ConcurrentHashMap<>();
     private final ConcurrentHashSet<Listener<K, V>> listeners = new ConcurrentHashSet<>();
-    private final Lock integrityMutex = new ReentrantLock();
+    private final Lock consistentMutex = new ReentrantLock();
 
     /**
      * Create manager of {@linkplain QueueCache queues}, which are based on dynamic caches.
@@ -165,7 +164,7 @@ public class QueuesManager<K, V> {
     private void restoreQueues() {
         log.debug("Try to restore existing queues in the cluster...");
         try {
-            integrityMutex.lock();
+            consistentMutex.lock();
             for (Map.Entry<String, Boolean> entry : queuesManagerCache.entrySet()) {
                 QueueCache<K, V> queue = createQueueLocal(entry.getKey());
                 // Fire restore event
@@ -173,7 +172,7 @@ public class QueuesManager<K, V> {
                     listener.onQueueRestored(entry.getKey(), queue);
             }
         } finally {
-            integrityMutex.unlock();
+            consistentMutex.unlock();
         }
         if (queues.isEmpty())
             log.debug("No existing queues was found in the cluster");
@@ -182,30 +181,54 @@ public class QueuesManager<K, V> {
     }
 
     /**
-     * Create queue (based on dynamic cache).
+     * Encode queue name to as dynamic cache name (to avoid collision)
+     *
+     * @param name Queue base name
+     * @return Queue encoded name
+     */
+    protected String encodeName(String name) {
+        return CACHE_NAME_PREFIX + "-" + name;
+    }
+
+    /**
+     * Decode dynamic cache name to get based queue name (to avoid collision)
+     *
+     * @param name Dynamic cache name (encoded queue name)
+     * @return Based queue name
+     */
+    protected String decodeName(String name) {
+        return name.replaceFirst("^" + CACHE_NAME_PREFIX + "-", "");
+    }
+
+    /**
+     * Create queue.
      * If replicated cache mode is used for static cache of queues wrappers
      * - that queue will be replicated across the cluster.
      *
-     * @param name Name of the cache queue
+     * @param name Name of the queue
      * @return Created cache queue
      */
     public QueueCache<K, V> createQueue(String name) {
-        String queueCacheName = createQueueCacheName(name);
         // TODO Later: Could be improved using transaction
         if (!containsQueue(name)) {
             // Share message [Replicated Queue is created] across cluster
             // After all Nodes get that message, event will be processed in current Thread for current Node
-            queuesManagerCache.put(queueCacheName, true);
+            queuesManagerCache.put(name, true);
         }
-        return queues.get(queueCacheName);
+        return queues.get(name);
     }
 
-    // Create queue, but do not put it to the cache (only local storage)
+    /**
+     * Create queue, but do not put it to the cache (only local storage)
+     *
+     * @param name Name of the queue
+     * @return Created cache queue
+     */
     private QueueCache<K, V> createQueueLocal(String name) {
         // Generate new Queue
         QueueCache<K, V> queue = null;
         log.debugf("New local queue instance [%s] is created in current node", name);
-        String queueCacheName = createQueueCacheName(name);
+        String queueCacheName = encodeName(name);
         cacheManager.defineConfiguration(queueCacheName, queuesConf);
         Cache<K, V> queueCache = cacheManager.getCache(queueCacheName);
         // Create queue
@@ -224,12 +247,11 @@ public class QueuesManager<K, V> {
      * @return Cache queue
      */
     public QueueCache<K, V> getQueue(String name) {
-        String queueCacheName = createQueueCacheName(name);
         try {
-            integrityMutex.lock();
-            return (queuesManagerCache.containsKey(queueCacheName)) ? queues.get(queueCacheName) : null;
+            consistentMutex.lock();
+            return (queuesManagerCache.containsKey(name)) ? queues.get(name) : null;
         } finally {
-            integrityMutex.unlock();
+            consistentMutex.unlock();
         }
     }
 
@@ -249,12 +271,11 @@ public class QueuesManager<K, V> {
      * @return {@code true} - queue exists {@code false} - otherwise
      */
     public boolean containsQueue(String name) {
-        String queueCacheName = createQueueCacheName(name);
         try {
-            integrityMutex.lock();
-            return (queuesManagerCache.containsKey(queueCacheName)) && queues.containsKey(queueCacheName);
+            consistentMutex.lock();
+            return (queuesManagerCache.containsKey(name)) && queues.containsKey(name);
         } finally {
-            integrityMutex.unlock();
+            consistentMutex.unlock();
         }
     }
 
@@ -267,16 +288,8 @@ public class QueuesManager<K, V> {
         if (containsQueue(name)) {
             // Share message [Replicated Queue is removed] across cluster
             // After all Nodes get that message, event will be processed in current Thread for current Node
-            queuesManagerCache.remove(createQueueCacheName(name));
+            queuesManagerCache.remove(encodeName(name));
         }
-    }
-
-    protected String createQueueCacheName(String name) {
-        return CACHE_NAME_PREFIX + "-" + name;
-    }
-
-    protected String parseName(String queueCacheName) {
-        return queueCacheName.replaceFirst("^" + CACHE_NAME_PREFIX + "-", "");
     }
 
     /**
@@ -313,15 +326,16 @@ public class QueuesManager<K, V> {
         @CacheEntryCreated
         public void onAdded(CacheEntryCreatedEvent<String, Boolean> event) {
             if (event.isPre()) return;
-            log.debug("Queue {" + event.getKey() + ": " + event.getValue() + "} was added in queuesManagerCache "
+            String name = event.getKey();
+            log.debug("Queue {" + name + ": " + event.getValue() + "} was added in cache "
                     + event.getCache());
             QueueCache<K, V> queue = null;
             try {
-                integrityMutex.lock();
-                if (!queues.containsKey(event.getKey()))
-                    queue = createQueueLocal(event.getKey());
+                consistentMutex.lock();
+                if (!queues.containsKey(name))
+                    queue = createQueueLocal(name);
             } finally {
-                integrityMutex.unlock();
+                consistentMutex.unlock();
             }
             // Fire on added event
             for (Listener<K, V> listener : listeners)
@@ -331,15 +345,19 @@ public class QueuesManager<K, V> {
         @CacheEntryRemoved
         public void onRemoved(CacheEntryRemovedEvent<String, Boolean> event) {
             if (event.isPre()) return;
-            log.debug("Queue {" + event.getKey() + ": " + event.getValue() + "} was removed from queuesManagerCache "
+            String name = event.getKey();
+            log.debug("Queue {" + name + ": " + event.getValue() + "} was removed from cache "
                     + event.getCache());
             QueueCache<K, V> queue = null;
             try {
-                integrityMutex.lock();
-                if (queues.containsKey(event.getKey()))
-                    queue = queues.remove(event.getKey());
+                consistentMutex.lock();
+                // Remove local queue
+                if (queues.containsKey(name))
+                    queue = queues.remove(name);
+                // Remove dynamic cache
+                cacheManager.removeCache(decodeName(name));
             } finally {
-                integrityMutex.unlock();
+                consistentMutex.unlock();
             }
             // Fire on remove event
             for (Listener<K, V> listener : listeners)

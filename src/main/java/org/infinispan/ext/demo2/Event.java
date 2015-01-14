@@ -1,6 +1,7 @@
 package org.infinispan.ext.demo2;
 
 import java.io.Serializable;
+import java.util.Date;
 
 /**
  * Event for processing
@@ -12,6 +13,8 @@ public class Event implements Serializable, Comparable<Event> {
     // Fields
     private int id;
     private String reason;
+    private Date timestamp;
+    // Should be not persisted in database
     private String owner;
     private boolean isProcessed;
     private int processingTime;
@@ -25,6 +28,7 @@ public class Event implements Serializable, Comparable<Event> {
     public Event(int id, String reason) {
         this.id = id;
         this.reason = reason;
+        timestamp = new Date();
     }
 
     /**
@@ -43,6 +47,15 @@ public class Event implements Serializable, Comparable<Event> {
      */
     public String getReason() {
         return reason;
+    }
+
+    /**
+     * Get timestamp
+     *
+     * @return Timestamp
+     */
+    public Date getTimestamp() {
+        return timestamp;
     }
 
     /**
@@ -110,6 +123,7 @@ public class Event implements Serializable, Comparable<Event> {
         return "Event{" +
                 "id=" + id +
                 ", reason='" + reason + '\'' +
+                ", timestamp=" + timestamp +
                 ", owner='" + owner + '\'' +
                 ", isProcessed=" + isProcessed +
                 ", processingTime=" + processingTime +
@@ -118,9 +132,19 @@ public class Event implements Serializable, Comparable<Event> {
 
     @Override
     public int compareTo(Event event) {
-        if (getProcessingTime() < event.getProcessingTime()) return -1;
-        if (getProcessingTime() == event.getProcessingTime()) return 0;
-        return 1;
+        return getTimestamp().compareTo(event.getTimestamp());
     }
 
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        Event event = (Event) o;
+        return id == event.id;
+    }
+
+    @Override
+    public int hashCode() {
+        return id;
+    }
 }
