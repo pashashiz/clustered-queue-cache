@@ -9,11 +9,10 @@ import org.infinispan.manager.EmbeddedCacheManager;
 import org.infinispan.notifications.cachelistener.event.CacheEntryCreatedEvent;
 import org.infinispan.notifications.cachelistener.event.CacheEntryModifiedEvent;
 import org.infinispan.notifications.cachelistener.event.CacheEntryRemovedEvent;
-import org.infinispan.notifications.cachelistener.event.TopologyChangedEvent;
-import org.infinispan.notifications.cachemanagerlistener.event.ViewChangedEvent;
 import org.infinispan.remoting.transport.Address;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -31,7 +30,6 @@ public enum EventDispatcher {
     // Logger
     private final Logger log = Logger.getLogger(EventDispatcher.class);
     // Fields
-    private final String nodeName;
     protected final QueuesManager<String, Event> queuesManager;
     protected final EmbeddedCacheManager cacheManager;
 
@@ -39,7 +37,6 @@ public enum EventDispatcher {
      * Create event dispatcher
      */
     private EventDispatcher() {
-        nodeName = System.getProperty("nodeName");
         cacheManager = createCacheManagerFromXml();
         // Init queues manager with default configuration and base listener
         queuesManager = new QueuesManager<>(cacheManager, QueuesManager.QueueType.PRIORITY, getQueuesListener());
@@ -86,10 +83,12 @@ public enum EventDispatcher {
             }
 
             @Override
-            public void onTopologyChanged(TopologyChangedEvent event) {
-                // Will be improved
-                //for (Map.Entry<String, QueueCache<String, Event>> queueCacheEntry : queuesManager.getExistingQueues().entrySet())
-                //    tryProcessQueue(queueCacheEntry.getKey());
+            public void onClusterMembersLost(List<Address> addresses) {
+                List<String> owners = new ArrayList<>();
+                for (Address address : addresses)
+                    owners.add(address.toString());
+                for (Map.Entry<String, QueueCache<String, Event>> entry : queuesManager.getExistingQueues().entrySet())
+                    tryProcessQueue(entry.getKey(), owners);
             }
 
         };
@@ -125,8 +124,24 @@ public enum EventDispatcher {
         });
     }
 
-    // Try to process queue (try to take over queue optimistic lock and process )
+    /**
+     * Try to process queue (try to take over queue optimistic lock and process events).
+     * That method can be used only to process new events
+     *
+     * @param reason Queue reason
+     */
     private void tryProcessQueue(final String reason) {
+        tryProcessQueue(reason, null);
+    }
+
+    /**
+     * Try to process queue (try to take over queue optimistic lock and process events).
+     * That method can be used to process new events as well as reprocess events of other owners
+     *
+     * @param reason Queue reason
+     * @param ownersToReprocess Owners which events we can reprocess
+     */
+    private void tryProcessQueue(final String reason, final List<String> ownersToReprocess) {
         // Try to process entry - call temporary thread (will be improved later!)
         Thread process = new Thread(new Runnable() {
             @Override
@@ -139,12 +154,14 @@ public enum EventDispatcher {
                 // If queue does not empty
                 if (entry != null) {
                     // If event does not has an owner - try to get ownership
-                    if (entry.getValue().getOwner() == null) {
+                    String owner = entry.getValue().getOwner();
+                    if (owner == null || (ownersToReprocess != null && ownersToReprocess.contains(owner))) {
                         boolean hasOwnership = entry.updateIfConditional(new CacheEntry.Conditional<Event>() {
                             @Override
                             public boolean checkValue(Event value) {
                                 // Atomic double check within transaction
-                                return value.getOwner() == null;
+                                String owner = value.getOwner();
+                                return owner == null || (ownersToReprocess != null && ownersToReprocess.contains(owner));
                             }
                         }, new CacheEntry.Updater<Event>() {
                             @Override

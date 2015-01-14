@@ -8,9 +8,11 @@ import org.infinispan.notifications.cachelistener.event.CacheEntryModifiedEvent;
 import org.infinispan.notifications.cachelistener.event.CacheEntryRemovedEvent;
 import org.infinispan.notifications.cachelistener.event.TopologyChangedEvent;
 import org.infinispan.notifications.cachemanagerlistener.event.ViewChangedEvent;
+import org.infinispan.remoting.transport.Address;
 import org.infinispan.util.logging.LogFactory;
 
 import java.io.IOException;
+import java.util.List;
 
 /**
  * Node B to test {@link org.infinispan.ext.queue.QueuesManager}
@@ -73,8 +75,8 @@ public class NodeB extends Node {
             }
 
             @Override
-            public void onTopologyChanged(TopologyChangedEvent event) {
-
+            public void onClusterMembersLost(List<Address> addresses) {
+                // Do nothing
             }
 
         });

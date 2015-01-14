@@ -7,16 +7,19 @@ import org.infinispan.configuration.cache.ConfigurationBuilder;
 import org.infinispan.manager.EmbeddedCacheManager;
 import org.infinispan.notifications.cachelistener.annotation.CacheEntryCreated;
 import org.infinispan.notifications.cachelistener.annotation.CacheEntryRemoved;
-import org.infinispan.notifications.cachelistener.annotation.TopologyChanged;
 import org.infinispan.notifications.cachelistener.event.CacheEntryCreatedEvent;
 import org.infinispan.notifications.cachelistener.event.CacheEntryRemovedEvent;
-import org.infinispan.notifications.cachelistener.event.TopologyChangedEvent;
+import org.infinispan.notifications.cachemanagerlistener.annotation.ViewChanged;
+import org.infinispan.notifications.cachemanagerlistener.event.ViewChangedEvent;
+import org.infinispan.remoting.transport.Address;
 import org.infinispan.transaction.lookup.JBossStandaloneJTAManagerLookup;
 import org.infinispan.transaction.LockingMode;
 import org.infinispan.util.concurrent.ConcurrentHashSet;
 import org.infinispan.util.logging.Log;
 import org.infinispan.util.logging.LogFactory;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.Lock;
@@ -72,11 +75,11 @@ public class QueuesManager<K, V> {
         public void onQueueRemoved(CacheEntryRemovedEvent<String, Boolean> event, QueueCache<K, V> queue);
 
         /**
-         * Listener of event - Cluster view was changed
+         * Listener of event - Cluster members were lost
          *
-         * @param event View change event
+         * @param addresses Lost cluster members addresses
          */
-        public void onTopologyChanged(TopologyChangedEvent event);
+        public void onClusterMembersLost(List<Address> addresses);
 
     }
 
@@ -154,8 +157,10 @@ public class QueuesManager<K, V> {
                     .lockingMode(LockingMode.PESSIMISTIC).build();
         // Create cache for Queues Manager
         queuesManagerCache = cacheManager.getCache(queuesManagerCacheName);
-        // Add listener (cache level)
-        queuesManagerCache.addListener(new LocalListener());
+        // Add listeners (cache level and manager level)
+        LocalListener localListener = new LocalListener();
+        queuesManagerCache.addListener(localListener);
+        cacheManager.addListener(localListener);
         // Restore queues which are existing in the cache
         restoreQueues();
     }
@@ -364,12 +369,20 @@ public class QueuesManager<K, V> {
                 listener.onQueueRemoved(event, queue);
         }
 
-        @TopologyChanged
-        public void onTopologyChanged(TopologyChangedEvent<String, Boolean> event) {
-            if (event.isPre()) return;
-            // Fire on topology changed event
+        @ViewChanged
+        public void onViewChanged(ViewChangedEvent event) {
+            List<Address> oldMembers = event.getOldMembers();
+            List<Address> currentMembers = event.getNewMembers();
+            List<Address> lostMembers = new ArrayList<>();
+            for (Address old : oldMembers)
+                if (!currentMembers.contains(old))
+                    lostMembers.add(old);
+            if (!lostMembers.isEmpty())
+                log.debugf("It was lost %d cluster node%s %s",
+                        lostMembers.size(), lostMembers.size() > 0 ? "s" : "", lostMembers);
+            // Fire on lost cluster members were lost event
             for (Listener<K, V> listener : listeners)
-                listener.onTopologyChanged(event);
+                listener.onClusterMembersLost(lostMembers);
         }
 
     }
