@@ -147,7 +147,7 @@ public enum EventDispatcher {
      * That method can be used to process new events as well as reprocess events of other owners
      *
      * @param reason Queue reason
-     * @param ownersToReprocess Owners which events we can reprocess
+     * @param ownersToReprocess Owners which events we can be reprocessed
      */
     private void tryProcessQueue(final String reason, final List<String> ownersToReprocess) {
         // Try to process entry - call temporary thread (will be improved later!)
@@ -157,32 +157,39 @@ public enum EventDispatcher {
                 imitationWait();
                 // Get replicable queue
                 QueueCache<String, Event> queue = getQueue(reason);
-                // Check last event - if we can process it
+                // Check if we can process head element of the queue
                 CacheEntry<String, Event> entry = queue.peek();
-                // If queue does not empty
-                if (entry != null) {
-                    // If event does not has an owner - try to get ownership
-                    String owner = entry.getValue().getOwner();
-                    if (owner == null || (ownersToReprocess != null && ownersToReprocess.contains(owner))) {
-                        boolean hasOwnership = entry.updateIfConditional(new CacheEntry.Conditional<Event>() {
-                            @Override
-                            public boolean checkValue(Event value) {
-                                // Atomic double check within transaction
-                                String owner = value.getOwner();
-                                return owner == null || (ownersToReprocess != null && ownersToReprocess.contains(owner));
-                            }
-                        }, new CacheEntry.Updater<Event>() {
-                            @Override
-                            public void update(Event value) {
-                                // Update ownership
-                                value.setOwner(cacheManager.getAddress().toString());
-                            }
-                        });
-                        // If we have ownership - process event!!!
-                        if (hasOwnership)
-                            EventProcessor.getInstance().processEvent(entry);
-                    }
-                }
+                // If queue does not empty and it was locked successfully by current node - process it
+                if (entry != null && tryToLock(entry, ownersToReprocess))
+                    EventProcessor.getInstance().processEvent(entry);
+            }
+        });
+    }
+
+    /**
+     * Try to lock event. Event could be locked in case it does not has an owner or events
+     * of that owner could be reprocessed
+     *
+     * @param entry Entry to lock
+     * @param ownersToReprocess Owners which events we can be reprocessed
+     * @return {@code true} - if event was locked successfully, {@code false} - otherwise
+     */
+    private boolean tryToLock(CacheEntry<String, Event> entry, final List<String> ownersToReprocess) {
+        String owner = entry.getValue().getOwner();
+        // If event does not has an owner or events of that owner could be reprocessed - try to lock it
+        return (owner == null || (ownersToReprocess != null && ownersToReprocess.contains(owner)))
+                && entry.updateIfConditional(new CacheEntry.Conditional<Event>() {
+            @Override
+            public boolean checkValue(Event value) {
+                // Atomic double check within transaction
+                String owner = value.getOwner();
+                return owner == null || (ownersToReprocess != null && ownersToReprocess.contains(owner));
+            }
+        }, new CacheEntry.Updater<Event>() {
+            @Override
+            public void update(Event value) {
+                // Update ownership if atomic double check is true
+                value.setOwner(cacheManager.getAddress().toString());
             }
         });
     }
