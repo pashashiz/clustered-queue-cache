@@ -38,7 +38,7 @@ public enum EventProcessor {
         Event event = entry.getValue();
         log.debug("Start of Event processing [" + event + "]...");
         try {
-            Thread.sleep(event.getProcessingTime() * 1000);
+            Thread.sleep(event.getProcessingTime());
         } catch (InterruptedException e) {
             log.error(e);
         }

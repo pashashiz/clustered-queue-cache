@@ -214,7 +214,6 @@ public class QueuesManager<K, V> {
      * @return Created cache queue
      */
     public QueueCache<K, V> createQueue(String name) {
-        // TODO Later: Could be improved using transaction
         if (!containsQueue(name)) {
             // Share message [Replicated Queue is created] across cluster
             // After all Nodes get that message, event will be processed in current Thread for current Node

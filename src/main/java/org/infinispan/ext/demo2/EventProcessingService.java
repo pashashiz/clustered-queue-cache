@@ -20,6 +20,7 @@ public class EventProcessingService {
     // Fields
     private final Logger log = Logger.getLogger(EventProcessingService.class);
     private boolean isStarted;
+    private String nodeName;
 
     /**
      * Create service for processing of events
@@ -27,6 +28,7 @@ public class EventProcessingService {
      * @param name Service name (Node name)
      */
     public EventProcessingService(String name) {
+        nodeName = name;
         System.setProperty("nodeName", name);
     }
 
@@ -47,32 +49,41 @@ public class EventProcessingService {
             isStarted = true;
             Scanner scanner = new Scanner(System.in);
             log.info("Enter the command: ");
+            int i = nodeName.equals("A") ? -2 : -1;
             // Init Event Dispatcher
             EventDispatcher.getInstance();
             // Read commands from command line
-            while (isStarted()) {
+            while (isStarted() && i < 100) {
+//                try {
+                    Event event = new Event(i += 2, "reason-1");
+                    event.setProcessingTime(50);
+                    EventDispatcher.getInstance().postEvent(event);
                 try {
-                    // Parse command
-                    String line = scanner.nextLine();
-                    Command command = new Command(line);
-                    command.parse();
-                    switch (command.operation) {
-                        // Send event to process
-                        case SEND:
-                            Event event = new Event(command.eventId, command.eventReason);
-                            event.setProcessingTime(command.eventProcessingTime);
-                            EventDispatcher.getInstance().postEvent(event);
-                            break;
-                        // Stop service
-                        case STOP:
-                            stop();
-                            break;
-                    }
-                } catch (CmdLineException e) {
-                    // Wrong command
-                    log.error(e.getMessage());
-                    e.getParser().printUsage(System.out);
+                    Thread.sleep((long) (Math.random() * 100));
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
                 }
+                // Parse command
+//                    String line = scanner.nextLine();
+//                    Command command = new Command(line);
+//                    command.parse();
+//                    switch (command.operation) {
+//                        // Send event to process
+//                        case SEND:
+//                            Event event = new Event(command.eventId, command.eventReason);
+//                            event.setProcessingTime(command.eventProcessingTime);
+//                            EventDispatcher.getInstance().postEvent(event);
+//                            break;
+//                        // Stop service
+//                        case STOP:
+//                            stop();
+//                            break;
+//                    }
+//                } catch (CmdLineException e) {
+//                    // Wrong command
+//                    log.error(e.getMessage());
+//                    e.getParser().printUsage(System.out);
+//                }
             }
         }
     }
@@ -111,8 +122,8 @@ public class EventProcessingService {
         @Option(name="-r", usage="event reason")
         public String eventReason = "reason-1";
 
-        @Option(name="-t", usage="event processing time, sec")
-        public int eventProcessingTime = 20;
+        @Option(name="-t", usage="event processing time, ms")
+        public int eventProcessingTime = 5000;
 
         private String rawCommand;
 

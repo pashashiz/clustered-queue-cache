@@ -101,7 +101,7 @@ public class Event implements Serializable, Comparable<Event> {
     /**
      * Get processing time
      *
-     * @return Processing time in sec (dummy time to process event)
+     * @return Processing time in ms (dummy time to process event)
      */
     public int getProcessingTime() {
         return processingTime;
@@ -110,7 +110,7 @@ public class Event implements Serializable, Comparable<Event> {
     /**
      * Set processing time
      *
-     * @param processingTime Processing time in sec (dummy time to process event)
+     * @param processingTime Processing time in ms (dummy time to process event)
      * @return Itself
      */
     public Event setProcessingTime(int processingTime) {

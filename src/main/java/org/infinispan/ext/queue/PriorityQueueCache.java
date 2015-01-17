@@ -192,7 +192,7 @@ public class PriorityQueueCache<K, V>
 
         @Override
         public int compareTo(CacheEntry<K, V> value) {
-            return ((Comparable<V>)value.getValue()).compareTo(value.getValue());
+            return ((Comparable<V>)getValue()).compareTo(value.getValue());
         }
 
     }

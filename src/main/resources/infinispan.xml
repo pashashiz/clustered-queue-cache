@@ -10,11 +10,17 @@
 
     <cache-container default-cache="default">
         <transport stack="udp" node-name="${nodeName}"/>
-        <!--<replicated-cache name="example" mode="SYNC">-->
-            <!--<locking isolation="REPEATABLE_READ" striping="false"/>-->
-            <!--<transaction transaction-manager-lookup="org.infinispan.transaction.lookup.JBossStandaloneJTAManagerLookup"-->
-                         <!--mode="FULL_XA" locking="PESSIMISTIC"/>-->
-        <!--</replicated-cache>-->
+        <replicated-cache name="events" mode="SYNC">
+            <locking isolation="REPEATABLE_READ" striping="false"/>
+            <transaction transaction-manager-lookup="org.infinispan.transaction.lookup.JBossStandaloneJTAManagerLookup"
+                         mode="FULL_XA" locking="PESSIMISTIC"/>
+            <persistence passivation="false">
+                <store class="org.infinispan.ext.demo2.EventPersistenceWorker"
+                       fetch-state="false" preload="false" shared="false"
+                       purge="false" read-only="false" singleton="false">
+                </store>
+            </persistence>
+        </replicated-cache>
     </cache-container>
 
 </infinispan>

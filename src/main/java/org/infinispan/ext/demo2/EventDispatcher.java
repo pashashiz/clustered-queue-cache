@@ -47,7 +47,8 @@ public enum EventDispatcher {
         // Cache manager with base configuration
         cacheManager = createCacheManagerFromXml();
         // Init queues manager with default configuration and base listener
-        queuesManager = new QueuesManager<>(cacheManager, QueuesManager.QueueType.PRIORITY, getQueuesListener());
+        queuesManager = new QueuesManager<>(cacheManager, QueuesManager.QueueType.PRIORITY, getQueuesListener(),
+                null, "events");
     }
 
     /**
@@ -96,7 +97,7 @@ public enum EventDispatcher {
                 for (Address address : addresses)
                     owners.add(address.toString());
                 for (Map.Entry<String, QueueCache<String, Event>> entry : queuesManager.getExistingQueues().entrySet())
-                    tryProcessQueue(entry.getKey(), owners);
+                    tryProcessQueueElement(entry.getKey(), owners);
             }
 
         };
@@ -109,13 +110,13 @@ public enum EventDispatcher {
             @Override
             public void onEntryAdded(final CacheEntryCreatedEvent<String, Event> event) {
                 // Try to process queue (try to take over queue optimistic lock and process)
-                tryProcessQueue(reason);
+                tryProcessQueueElement(reason);
             }
 
             @Override
             public void onEntryRestored(CacheEntry<String, Event> entry) {
                 // Try to process queue (try to take over queue optimistic lock and process)
-                tryProcessQueue(reason);
+                tryProcessQueueElement(reason);
             }
 
             @Override
@@ -127,29 +128,29 @@ public enum EventDispatcher {
             @Override
             public void onEntryRemoved(CacheEntryRemovedEvent<String, Event> event) {
                 // Try to process queue (try to take over queue optimistic lock and process)
-                tryProcessQueue(reason);
+                tryProcessQueueElement(reason);
             }
         });
     }
 
     /**
-     * Try to process queue (try to take over queue optimistic lock and process events).
-     * That method can be used only to process new events
+     * Try to process next element of the queue (try to take over queue optimistic lock and process events).
+     * That method can be used only to process new event
      *
      * @param reason Queue reason
      */
-    private void tryProcessQueue(final String reason) {
-        tryProcessQueue(reason, null);
+    private void tryProcessQueueElement(final String reason) {
+        tryProcessQueueElement(reason, null);
     }
 
     /**
-     * Try to process queue (try to take over queue optimistic lock and process events).
-     * That method can be used to process new events as well as reprocess events of other owners
+     * Try to process next element of the queue (try to take over queue optimistic lock and process events).
+     * That method can be used to process new event as well as reprocess event of other owners
      *
      * @param reason Queue reason
      * @param ownersToReprocess Owners which events we can be reprocessed
      */
-    private void tryProcessQueue(final String reason, final List<String> ownersToReprocess) {
+    private void tryProcessQueueElement(final String reason, final List<String> ownersToReprocess) {
         // Try to process entry - call temporary thread (will be improved later!)
         executor.submit(new Runnable() {
             @Override
@@ -160,21 +161,21 @@ public enum EventDispatcher {
                 // Check if we can process head element of the queue
                 CacheEntry<String, Event> entry = queue.peek();
                 // If queue does not empty and it was locked successfully by current node - process it
-                if (entry != null && tryToLock(entry, ownersToReprocess))
+                if (entry != null && tryLock(entry, ownersToReprocess))
                     EventProcessor.getInstance().processEvent(entry);
             }
         });
     }
 
     /**
-     * Try to lock event. Event could be locked in case it does not has an owner or events
-     * of that owner could be reprocessed
+     * Try to acquire the optimistic lock of the event.
+     * Event could be locked in case it does not has an owner or events of that owner could be reprocessed
      *
      * @param entry Entry to lock
      * @param ownersToReprocess Owners which events we can be reprocessed
      * @return {@code true} - if event was locked successfully, {@code false} - otherwise
      */
-    private boolean tryToLock(CacheEntry<String, Event> entry, final List<String> ownersToReprocess) {
+    private boolean tryLock(CacheEntry<String, Event> entry, final List<String> ownersToReprocess) {
         String owner = entry.getValue().getOwner();
         // If event does not has an owner or events of that owner could be reprocessed - try to lock it
         return (owner == null || (ownersToReprocess != null && ownersToReprocess.contains(owner)))
@@ -219,9 +220,13 @@ public enum EventDispatcher {
      * @return {@code true} - event was removed, {@code false} - otherwise
      */
     public boolean removeEvent(Event event) {
-        QueueCache<String, Event> queue = getQueue(event.getReason());
+        String reason = event.getReason();
+        QueueCache<String, Event> queue = getQueue(reason);
         // Remove processed event
         queue.poll();
+        // TODO Risky operation
+        if (queue.isEmpty())
+            queuesManager.removeQueue(reason);
         return true;
     }
 
