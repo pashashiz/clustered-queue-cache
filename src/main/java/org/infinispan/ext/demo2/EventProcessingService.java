@@ -8,6 +8,7 @@ import org.kohsuke.args4j.Option;
 import org.kohsuke.args4j.spi.Messages;
 
 import java.io.IOException;
+import java.sql.SQLException;
 import java.util.Scanner;
 
 /**
@@ -49,11 +50,18 @@ public class EventProcessingService {
             isStarted = true;
             Scanner scanner = new Scanner(System.in);
             log.info("Enter the command: ");
-            int i = nodeName.equals("A") ? -2 : -1;
             // Init Event Dispatcher
             EventDispatcher.getInstance();
+            // Clear Event table
+//            try {
+//                log.debug("Remove all events...");
+//                new EventDao().removeAllEvents();
+//            } catch (SQLException e) {
+//                log.error("Error remove all database operation");
+//            }
             // Read commands from command line
-            while (isStarted() && i < 100) {
+            int i = nodeName.equals("A") ? -1 : 0;
+            while (isStarted() && i < -1) {
 //                try {
                     Event event = new Event(i += 2, "reason-1");
                     event.setProcessingTime(50);

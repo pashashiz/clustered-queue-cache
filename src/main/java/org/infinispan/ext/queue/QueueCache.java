@@ -50,8 +50,9 @@ public interface QueueCache<K, V> extends Queue<CacheEntry<K, V>> {
          * Listener of event - Cache entry was removed
          *
          * @param event Cache entry event
+         * @param underlyingCacheName Underlying cache name
          */
-        void onEntryRemoved(CacheEntryRemovedEvent<K, V> event);
+        void onEntryRemoved(CacheEntryRemovedEvent<K, V> event, String underlyingCacheName);
 
     }
 

@@ -47,8 +47,9 @@ public enum EventDispatcher {
         // Cache manager with base configuration
         cacheManager = createCacheManagerFromXml();
         // Init queues manager with default configuration and base listener
-        queuesManager = new QueuesManager<>(cacheManager, QueuesManager.QueueType.PRIORITY, getQueuesListener(),
-                null, "events");
+        queuesManager = new QueuesManager<>(cacheManager, QueuesManager.QueueType.PRIORITY,
+                getQueuesListener(), getQueueElementListener(),
+                "events-queues", "events");
     }
 
     /**
@@ -70,20 +71,18 @@ public enum EventDispatcher {
         }
     }
 
-    // Get dispatching listeners
+    // Get queue listener
     private QueuesManager.Listener<String, Event> getQueuesListener() {
         return new QueuesManager.Listener<String, Event>() {
 
             @Override
             public void onQueueAdded(CacheEntryCreatedEvent<String, Boolean> event, QueueCache<String, Event> queue) {
-                // Listen all queue events
-                listenQueue(event.getKey(), queue);
+                // Do nothing
             }
 
             @Override
             public void onQueueRestored(String name, QueueCache<String, Event> queue) {
-                // Listen all queue events
-                listenQueue(name, queue);
+                // Do nothing
             }
 
             @Override
@@ -103,20 +102,19 @@ public enum EventDispatcher {
         };
     }
 
-    // Listen queue events
-    private void listenQueue(final String reason, final QueueCache<String, Event> queue) {
-        // Init queue entry listeners
-        queue.addListener(new QueueCache.Listener<String, Event>() {
+    // Get queue elements listener
+    private QueueCache.Listener<String, Event> getQueueElementListener() {
+        return new QueueCache.Listener<String, Event>() {
             @Override
             public void onEntryAdded(final CacheEntryCreatedEvent<String, Event> event) {
                 // Try to process queue (try to take over queue optimistic lock and process)
-                tryProcessQueueElement(reason);
+                tryProcessQueueElement(event.getValue().getReason());
             }
 
             @Override
             public void onEntryRestored(CacheEntry<String, Event> entry) {
                 // Try to process queue (try to take over queue optimistic lock and process)
-                tryProcessQueueElement(reason);
+                tryProcessQueueElement(entry.getValue().getReason());
             }
 
             @Override
@@ -126,11 +124,11 @@ public enum EventDispatcher {
 
 
             @Override
-            public void onEntryRemoved(CacheEntryRemovedEvent<String, Event> event) {
+            public void onEntryRemoved(CacheEntryRemovedEvent<String, Event> event, String underlyingCacheName) {
                 // Try to process queue (try to take over queue optimistic lock and process)
-                tryProcessQueueElement(reason);
+                tryProcessQueueElement(QueuesManager.decodeName(underlyingCacheName));
             }
-        });
+        };
     }
 
     /**

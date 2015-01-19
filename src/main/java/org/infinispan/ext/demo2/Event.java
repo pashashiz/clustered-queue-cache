@@ -32,6 +32,19 @@ public class Event implements Serializable, Comparable<Event> {
     }
 
     /**
+     * Create new event
+     *
+     * @param id Event id
+     * @param reason Reason
+     * @param timestamp Timestamp
+     */
+    public Event(int id, String reason, Date timestamp) {
+        this.id = id;
+        this.reason = reason;
+        this.timestamp = timestamp;
+    }
+
+    /**
      * Get event id
      *
      * @return Event id

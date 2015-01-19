@@ -34,7 +34,7 @@ import java.util.concurrent.locks.ReentrantLock;
  * <p>In another case when it is uses local cache - all queues will be like local cache
  *
  * <p>If to create {@link QueuesManager} it was used full constructor
- * {@link QueuesManager#QueuesManager(EmbeddedCacheManager, QueuesManager.QueueType, QueuesManager.Listener, String, String)}
+ * {@link QueuesManager#QueuesManager(EmbeddedCacheManager, QueuesManager.QueueType, QueuesManager.Listener, QueueCache.Listener, String, String)}
  * you specify behaviour of that manager by changing <b>manager named cache</b> properties
  * and behaviour of queues elements by changing <b>queue named cache</b> properties.
  * Otherwise it will be used default cache properties - <b>synchronous replicated cache</b>
@@ -101,7 +101,8 @@ public class QueuesManager<K, V> {
     private final QueueType queuesType;
     private final Configuration queuesConf;
     private final ConcurrentHashMap<String, QueueCache<K, V>> queues = new ConcurrentHashMap<>();
-    private final ConcurrentHashSet<Listener<K, V>> listeners = new ConcurrentHashSet<>();
+    private final ConcurrentHashSet<Listener<K, V>> queueListeners = new ConcurrentHashSet<>();
+    private final QueueCache.Listener<K, V> queueElementStartupListener;
     private final Lock consistentMutex = new ReentrantLock();
 
     /**
@@ -111,10 +112,12 @@ public class QueuesManager<K, V> {
      *
      * @param cacheManager Cache manager
      * @param queuesType {@linkplain QueueType Type} of queues, which will be created by current manager
-     * @param listener Started listener
+     * @param queueListener Startup queue listener
+     * @param queueElementListener Startup queue element listener
      */
-    public QueuesManager(EmbeddedCacheManager cacheManager, QueueType queuesType, Listener<K, V> listener) {
-        this(cacheManager, queuesType, listener, null, null);
+    public QueuesManager(EmbeddedCacheManager cacheManager, QueueType queuesType,
+                         Listener<K, V> queueListener, QueueCache.Listener<K, V> queueElementListener) {
+        this(cacheManager, queuesType, queueListener, queueElementListener, null, null);
     }
 
     /**
@@ -122,17 +125,20 @@ public class QueuesManager<K, V> {
      *
      * @param cacheManager Cache manager
      * @param queuesType {@linkplain QueueType Type} of queues, which will be created by current manager
-     * @param listener Started listener
+     * @param queueListener Startup queue listener
+     * @param queueElementListener Startup queue element listener
      * @param queuesManagerConfName Name of configuration which will be used to create static cache of queues wrappers
      * @param queuesConfName Name of configuration which will be used to create dynamic caches of element of queues
      */
-    public QueuesManager(EmbeddedCacheManager cacheManager, QueueType queuesType, Listener<K, V> listener,
+    public QueuesManager(EmbeddedCacheManager cacheManager, QueueType queuesType,
+                         Listener<K, V> queueListener, QueueCache.Listener<K, V> queueElementListener,
                          String queuesManagerConfName, String queuesConfName) {
         if (cacheManager == null) throw new NullPointerException("Cache manager cannot be null");
         this.queuesType = queuesType;
         this.cacheManager = cacheManager;
-        if (listener != null)
-            this.listeners.add(listener);
+        if (queueListener != null)
+            this.queueListeners.add(queueListener);
+        queueElementStartupListener = queueElementListener;
         Configuration queuesManagerConf;
         // Read manager cache configuration if it exists
         if (queuesManagerConfName != null)
@@ -157,7 +163,7 @@ public class QueuesManager<K, V> {
                     .lockingMode(LockingMode.PESSIMISTIC).build();
         // Create cache for Queues Manager
         queuesManagerCache = cacheManager.getCache(queuesManagerCacheName);
-        // Add listeners (cache level and manager level)
+        // Add queueListeners (cache level and manager level)
         LocalListener localListener = new LocalListener();
         queuesManagerCache.addListener(localListener);
         cacheManager.addListener(localListener);
@@ -173,7 +179,7 @@ public class QueuesManager<K, V> {
             for (Map.Entry<String, Boolean> entry : queuesManagerCache.entrySet()) {
                 QueueCache<K, V> queue = createQueueLocal(entry.getKey());
                 // Fire restore event
-                for (Listener<K, V> listener : listeners)
+                for (Listener<K, V> listener : queueListeners)
                     listener.onQueueRestored(entry.getKey(), queue);
             }
         } finally {
@@ -191,7 +197,7 @@ public class QueuesManager<K, V> {
      * @param name Queue base name
      * @return Queue encoded name
      */
-    protected String encodeName(String name) {
+    public static String encodeName(String name) {
         return CACHE_NAME_PREFIX + "-" + name;
     }
 
@@ -201,7 +207,7 @@ public class QueuesManager<K, V> {
      * @param name Dynamic cache name (encoded queue name)
      * @return Based queue name
      */
-    protected String decodeName(String name) {
+    public static String decodeName(String name) {
         return name.replaceFirst("^" + CACHE_NAME_PREFIX + "-", "");
     }
 
@@ -237,10 +243,11 @@ public class QueuesManager<K, V> {
         Cache<K, V> queueCache = cacheManager.getCache(queueCacheName);
         // Create queue
         switch (queuesType) {
-            case PRIORITY: queue = new PriorityQueueCache<>(queueCache);
+            case PRIORITY: queue = new PriorityQueueCache<>(queueCache, queueElementStartupListener);
         }
         // Thread safe put Replicable Queue to in memory local storage
         queues.putIfAbsent(name, queue);
+        // Add on startup listener
         return queue;
     }
 
@@ -302,7 +309,7 @@ public class QueuesManager<K, V> {
      * @param listener Queue listener to add
      */
     public void addListener(Listener<K, V> listener) {
-        listeners.add(listener);
+        queueListeners.add(listener);
     }
 
     /**
@@ -311,14 +318,14 @@ public class QueuesManager<K, V> {
      * @param listener Queue listener to remove
      */
     public void removeListener(Listener<K, V> listener) {
-        listeners.remove(listener);
+        queueListeners.remove(listener);
     }
 
     /**
-     * Remove all {@linkplain Listener queue listeners}
+     * Remove all {@linkplain Listener queue queueListeners}
      */
     public void removeAlListeners() {
-        listeners.clear();
+        queueListeners.clear();
     }
 
     /**
@@ -342,7 +349,7 @@ public class QueuesManager<K, V> {
                 consistentMutex.unlock();
             }
             // Fire on added event
-            for (Listener<K, V> listener : listeners)
+            for (Listener<K, V> listener : queueListeners)
                 listener.onQueueAdded(event, queue);
         }
 
@@ -364,7 +371,7 @@ public class QueuesManager<K, V> {
                 consistentMutex.unlock();
             }
             // Fire on remove event
-            for (Listener<K, V> listener : listeners)
+            for (Listener<K, V> listener : queueListeners)
                 listener.onQueueRemoved(event, queue);
         }
 
@@ -380,7 +387,7 @@ public class QueuesManager<K, V> {
                 log.debugf("It was lost %d cluster node%s %s",
                         lostMembers.size(), lostMembers.size() > 0 ? "s" : "", lostMembers);
             // Fire on lost cluster members were lost event
-            for (Listener<K, V> listener : listeners)
+            for (Listener<K, V> listener : queueListeners)
                 listener.onClusterMembersLost(lostMembers);
         }
 

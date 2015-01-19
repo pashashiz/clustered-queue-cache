@@ -40,7 +40,7 @@ public abstract class Node {
         nodeName = name;
         cacheManager = createCacheManagerFromXml();
         // Init queues manager with default configuration
-        queuesManager = new QueuesManager<>(cacheManager, QueuesManager.QueueType.PRIORITY, null);
+        queuesManager = new QueuesManager<>(cacheManager, QueuesManager.QueueType.PRIORITY, null, null);
     }
 
     private EmbeddedCacheManager createCacheManagerFromXml() throws IOException {

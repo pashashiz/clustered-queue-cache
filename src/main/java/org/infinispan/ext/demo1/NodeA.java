@@ -54,7 +54,7 @@ public class NodeA extends Node {
                     }
 
                     @Override
-                    public void onEntryRemoved(CacheEntryRemovedEvent<String, String> event) {
+                    public void onEntryRemoved(CacheEntryRemovedEvent<String, String> event, String underlyingCacheName) {
                         log.debugf("Entry [%] was removed in the cache %s by %s node",
                                 event.getKey(), queueEvent.getKey(), (event.isOriginLocal()) ? "current": "remote");
                     }

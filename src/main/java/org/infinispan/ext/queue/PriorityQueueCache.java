@@ -1,5 +1,6 @@
 package org.infinispan.ext.queue;
 
+import org.infinispan.notifications.cachelistener.annotation.CacheEntryEvicted;
 import org.infinispan.util.concurrent.ConcurrentHashSet;
 import org.infinispan.util.logging.Log;
 import org.infinispan.util.logging.LogFactory;
@@ -205,7 +206,7 @@ public class PriorityQueueCache<K, V>
     private final Cache<K, V> cache;
     private final PriorityQueue<CacheEntry<K, V>> queue;
     private final Lock mutex = new ReentrantLock();
-    private final Lock consistentMutex = new ReentrantLock();;
+    private final Lock consistentMutex = new ReentrantLock();
     private final ConcurrentHashSet<Listener<K, V>> listeners = new ConcurrentHashSet<>();
 
     /**
@@ -214,9 +215,10 @@ public class PriorityQueueCache<K, V>
      * and are ordered according to their {@linkplain Comparable natural ordering}
      *
      * @param cache {@link Cache} which will be based for the priority queue
+     * @param listener On startup listener
      */
-    PriorityQueueCache(Cache<K, V> cache) {
-        this(cache, null);
+    PriorityQueueCache(Cache<K, V> cache, Listener<K, V> listener) {
+        this(cache, listener, null);
     }
 
     /**
@@ -226,12 +228,18 @@ public class PriorityQueueCache<K, V>
      *
      * @param cache {@link Cache} which will be based for the priority queue
      * @param comparator Comparator to order the elements of the priority queue
+     * listener On startup listener
      */
-    PriorityQueueCache(Cache<K, V> cache, Comparator<? super CacheEntry<K, V>> comparator) {
+    PriorityQueueCache(Cache<K, V> cache, Listener<K, V> listener, Comparator<? super CacheEntry<K, V>> comparator) {
+        // Add on startup listener
+        if (listener != null)
+            listeners.add(listener);
+        // Init local queue and cache
         queue = (comparator != null) ? new PriorityQueue<>(DEFAULT_INITIAL_CAPACITY, comparator)
                 : new PriorityQueue<CacheEntry<K, V>>();
         this.cache = cache;
         this.cache.addListener(new LocalListener());
+        // Restore existing queue elements
         restoreElements();
     }
 
@@ -527,7 +535,7 @@ public class PriorityQueueCache<K, V>
             }
             // Fire on removed event
             for (Listener<K, V> listener : listeners)
-                listener.onEntryRemoved(event);
+                listener.onEntryRemoved(event, cache.getName());
         }
 
     }
